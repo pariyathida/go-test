@@ -7,8 +7,11 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"./cipher"
+    "github.com/omise/omise-go"
+	"github.com/omise/omise-go/operations"
 )
 
 //go:generate go build -o gen ./generator
@@ -16,7 +19,11 @@ import (
 /* Model */
 type donator struct {
 	name     string
-	donation int // not thread-safe
+	donation int64 // not thread-safe
+	ccNumber string
+	cvv      string
+	expMonth int
+	expYear  int
 }
 
 /* Reader & Writer */
@@ -74,9 +81,17 @@ func readDecodedFile(filename string) (donators []donator) {
 			if len(row) == totalFields {
 				newdonator := donator{
 					name: row[0],
+					ccNumber: row[2],
+					cvv: row[3],
 				}
-				if newdonator.donation, err = strconv.Atoi(row[1]); err != nil {
+				if newdonator.donation, err = strconv.ParseInt(row[1], 10, 64); err != nil {
 					log.Panic(err)
+				}
+				if newdonator.expMonth, err = strconv.Atoi(row[4]); err != nil {
+					log.Panic(err)					
+				}
+				if newdonator.expYear, err = strconv.Atoi(row[5]); err != nil {
+					log.Panic(err)					
 				}
 				donators = append(donators, newdonator)
 			}
@@ -85,6 +100,45 @@ func readDecodedFile(filename string) (donators []donator) {
 		}
 		i++
 	}
+}
+
+/*Charge*/
+const (
+	// Read these from environment variables or configuration files!
+	OmisePublicKey = "pkey_test_5bpa0b3cpyakzssqckg"
+	OmiseSecretKey = "skey_test_5bp75648opp5swpa6kk"
+)
+
+func charge(donator donator){
+	client, e := omise.NewClient(OmisePublicKey, OmiseSecretKey)
+	if e != nil {
+		log.Fatal(e)
+	}
+	
+	expMonth := time.Month(donator.expMonth)
+
+	// Creates a token from a test card.
+	token, createToken := &omise.Token{}, &operations.CreateToken{
+		Name:            donator.name,
+		Number:          donator.ccNumber,
+		ExpirationMonth: expMonth,
+		ExpirationYear:  donator.expYear,
+	}
+	if e := client.Do(token, createToken); e != nil {
+		log.Fatal(e)
+	}
+
+	// Creates a charge from the token
+	charge, createCharge := &omise.Charge{}, &operations.CreateCharge{
+		Amount:   donator.donation, // ฿ 1,000.00
+		Currency: "thb",
+		Card:     token.ID,
+	}
+	if e := client.Do(charge, createCharge); e != nil {
+		log.Fatal(e)
+	}
+
+	log.Printf("charge: %s  amount: %s %d\n", charge.ID, charge.Currency, charge.Amount)
 }
 
 /* Main function */
@@ -108,12 +162,14 @@ func main() {
 
 	donators := readDecodedFile(fngName)
 
-	var total int
+	var total int64
 	for _, donator := range donators {
 		total += donator.donation
-		s := fmt.Sprintf("Donate by %s amount %d", donator.name, donator.donation)
+		s := fmt.Sprintf("Donate by %s amount %d cardnum %s %s %d %d", donator.name, donator.donation, donator.ccNumber, donator.cvv, donator.expMonth, donator.expYear)
 		fmt.Println(s)
+		charge(donator)
 	}
 	s := fmt.Sprintf("total received: THB  %d", total)
 	fmt.Println(s)
+	
 }
