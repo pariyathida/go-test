@@ -8,7 +8,8 @@ import (
 	"os"
 	"strconv"
 	"time"
-
+	"sort" 
+	
 	"./cipher"
     "github.com/omise/omise-go"
 	"github.com/omise/omise-go/operations"
@@ -25,6 +26,11 @@ type donator struct {
 	expMonth int
 	expYear  int
 }
+
+/* Variables for Summary */
+var totalReceived int64
+var successDonated int64
+var donatorNumber int
 
 /* Reader & Writer */
 func writeFile(w io.Writer, p []byte) (int, error) {
@@ -104,7 +110,7 @@ func readDecodedFile(filename string) (donators []donator) {
 
 /*Charge*/
 const (
-	// Read these from environment variables or configuration files!
+	/* Read these from environment variables or configuration files! */
 	OmisePublicKey = "pkey_test_5bpa0b3cpyakzssqckg"
 	OmiseSecretKey = "skey_test_5bp75648opp5swpa6kk"
 )
@@ -117,7 +123,7 @@ func charge(donator donator){
 	
 	expMonth := time.Month(donator.expMonth)
 
-	// Creates a token from a test card.
+	/* Creates a token from a test card.*/
 	token, createToken := &omise.Token{}, &operations.CreateToken{
 		Name:            donator.name,
 		Number:          donator.ccNumber,
@@ -128,18 +134,49 @@ func charge(donator donator){
 		log.Fatal(e)
 	}
 
-	// Creates a charge from the token
+	/* Creates a charge from the token */
 	charge, createCharge := &omise.Charge{}, &operations.CreateCharge{
-		Amount:   donator.donation, // ฿ 1,000.00
+		Amount:   donator.donation,
 		Currency: "thb",
 		Card:     token.ID,
 	}
 	if e := client.Do(charge, createCharge); e != nil {
 		log.Fatal(e)
 	}
-
-	log.Printf("charge: %s  amount: %s %d\n", charge.ID, charge.Currency, charge.Amount)
+    
+	successDonated += donator.donation
+	donatorNumber += 1
+	//log.Printf("charge: %s  amount: %s %d\n", charge.ID, charge.Currency, charge.Amount)
 }
+
+/* sort */
+type By func(d1, d2 *donator) bool
+
+type donatorSorter struct {
+	donators []donator
+	by func(d1, d2 *donator) bool 
+}
+
+func (by By) Sort(donators []donator) {
+	ds := &donatorSorter{
+		donators: donators,
+		by:      by, 
+	}
+	sort.Sort(ds)
+}
+
+func (s *donatorSorter) Len() int {
+	return len(s.donators)
+}
+
+func (s *donatorSorter) Swap(i, j int) {
+	s.donators[i], s.donators[j] = s.donators[j], s.donators[i]
+}
+
+func (s *donatorSorter) Less(i, j int) bool {
+	return s.by(&s.donators[i], &s.donators[j])
+}
+
 
 /* Main function */
 func main() {
@@ -162,14 +199,40 @@ func main() {
 
 	donators := readDecodedFile(fngName)
 
-	var total int64
+	/* perform donations */
+	fmt.Println("performing donations...")	
 	for _, donator := range donators {
-		total += donator.donation
-		s := fmt.Sprintf("Donate by %s amount %d cardnum %s %s %d %d", donator.name, donator.donation, donator.ccNumber, donator.cvv, donator.expMonth, donator.expYear)
-		fmt.Println(s)
+		totalReceived += donator.donation	
+		//s := fmt.Sprintf("Donate by %s amount %d cardnum %s %s %d %d", donator.name, donator.donation, donator.ccNumber, donator.cvv, donator.expMonth, donator.expYear)
+		//fmt.Println(s)
 		charge(donator)
 	}
-	s := fmt.Sprintf("total received: THB  %d", total)
-	fmt.Println(s)
+	fmt.Print("done.\n\n")
 	
+	/* summary */
+	s1 := fmt.Sprintf("      total received : THB  %.2f", float64(totalReceived)/100)
+	fmt.Println(s1)
+	s2 := fmt.Sprintf("successfully donated : THB  %.2f", float64(successDonated)/100)
+	fmt.Println(s2)
+	s3 := fmt.Sprintf("     faulty donation : THB  %.2f", float64(totalReceived-successDonated)/100)
+	fmt.Println(s3)
+
+	avgPerPerson := (float64(totalReceived)/float64(donatorNumber))/100
+	s4 := fmt.Sprintf("\n  average per person : THB  %.2f", avgPerPerson)
+	fmt.Println(s4)   
+	
+	/* sorting */
+	donation := func(d1, d2 *donator) bool {
+		return d1.donation > d2.donation
+	}	
+	By(donation).Sort(donators)
+	//fmt.Println("By donation:", donators)
+
+	/* display top donors */
+	fmt.Print("          top donors : ")
+	fmt.Print(donators[0].name)
+	fmt.Print("\n                       ")
+	fmt.Print(donators[1].name)
+	fmt.Print("\n                       ")
+	fmt.Print(donators[2].name)
 }
