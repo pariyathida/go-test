@@ -1,6 +1,5 @@
 ## Starting point
 
 ```
-go build -o tamboon .
-./tamboon ./data/fng.1000.csv
+go run tamboon.go ./data/fng.1000.csv
 ```
